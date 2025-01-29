@@ -1,0 +1,54 @@
+//load the imported shapefile from local directories 
+Map.addLayer(table);
+// Load Landsat 8 ImageCollection
+var l8 = ee.ImageCollection("LANDSAT/LC08/C02/T1")
+          .filterBounds(table) // Filter by region of interest
+          .filterDate('2020-01-01', '2023-12-31') // Time range
+          .filter(ee.Filter.lt('CLOUD_COVER', 10)); // Filter by cloud cover
+
+// Function to compute NDVI
+var addNDVI = function(image) {
+  var ndvi = image.normalizedDifference(['B5', 'B4']).rename('NDVI');
+  return image.addBands(ndvi);
+};
+
+// Apply NDVI computation to collection
+var l8_ndvi = l8.map(addNDVI);
+
+// Reduce ImageCollection to extract mean NDVI over time
+var ndviTimeSeries = l8_ndvi.select('NDVI')
+  .map(function(image) {
+    var meanNdvi = image.reduceRegion({
+      reducer: ee.Reducer.mean(),
+      geometry: table,
+      scale: 30,
+      bestEffort: true
+    });
+    return ee.Feature(null, {
+      'date': image.date().format('YYYY-MM-dd'),
+      'NDVI': meanNdvi.get('NDVI')
+    });
+  });
+
+// Convert to FeatureCollection
+var ndviChart = ui.Chart.feature.byFeature(ndviTimeSeries, 'date', 'NDVI')
+  .setOptions({
+    title: 'NDVI Time Series over Narok',
+    hAxis: { title: 'Date' },
+    vAxis: { title: 'NDVI' },
+    lineWidth: 2,
+    pointSize: 3,
+  });
+
+// Print chart
+print(ndviChart);
+
+// Visualization parameters
+var visParams = {min: 0, max: 0.3, bands: ['B4', 'B3', 'B2']};
+
+// Display most recent composite image
+var latestImage = l8_ndvi.sort('system:time_start', false).first();
+Map.addLayer(latestImage.clip(table), visParams, 'Latest Image');
+
+// Center map on region
+Map.centerObject(table, 8);
